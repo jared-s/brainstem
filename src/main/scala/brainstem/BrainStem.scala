@@ -36,7 +36,6 @@ class BrainStem extends Component {
     val LED3 = out Bool
     val LED4 = out Bool
     val LED5 = out Bool
-    val halt = out Bool
   }
 
   noIoPrefix()
@@ -45,20 +44,13 @@ class BrainStem extends Component {
 
   val code = new ArrayBuffer[BigInt]
 
-
-  // [-]+++
+  // [-]>]
   code.append(Op.JumpF)
   code.append(Op.DataDec)
   code.append(Op.JumpB)
-  code.append(Op.DataInc)
-  code.append(Op.DataInc)
-  code.append(Op.DataInc)
-  code.append(Op.DataInc)
-  code.append(Op.DataInc)
-  code.append(Op.DataInc)
-  code.append(Op.DataInc)
-  code.append(Op.DataInc)
-  code.append(Op.DataInc)
+  code.append(Op.Inc)
+  code.append(Op.JumpB)
+
 
   val codeMemSize = code.size
 
@@ -93,6 +85,8 @@ class BrainStem extends Component {
 
     Cold.onEntry {
       dataMem(0) := 2
+      dataMem(1) := 3
+
       ledState := 0
       pc := 0
       dp := 0
@@ -204,18 +198,16 @@ class BrainStem extends Component {
     }
   }
 
-  io.halt := pc === 0xF
-
-  io.LEDR_N := ledState(0)
-  io.LEDG_N := ledState(1)
-  io.LED_RED_N := ledState(2)
-  io.LED_GRN_N := ledState(3)
-  io.LED_BLU_N := ledState(4)
-  io.LED1 := ledState(5)
-  io.LED2 := ledState(6)
+  io.LEDR_N := dpIncDec
+  io.LEDG_N := dpIncEnable
+  io.LED_RED_N := op(0)
+  io.LED_GRN_N := op(1)
+  io.LED_BLU_N := op(2)
+  io.LED1 := dataIncDec
+  io.LED2 := dataIncEnable
   io.LED3 := ledState(7)
-  io.LED4 := ledState(8)
-  io.LED5 := ledState(9)
+  io.LED4 := dp(0)
+  io.LED5 := pc(0)
 }
 
 object BrainStemVerilog {
