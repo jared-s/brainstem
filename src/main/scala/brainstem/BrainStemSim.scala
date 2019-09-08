@@ -13,6 +13,8 @@ object BrainStemSim {
 
       for(idx <- 0 to 99){
         dut.clockDomain.waitRisingEdge()
+      //  if(dut.io.halt.toBoolean)
+      //    return
       }
     }
   }

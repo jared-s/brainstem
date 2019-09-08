@@ -5,8 +5,23 @@ import spinal.lib.fsm.{EntryPoint, State, StateMachine}
 
 import scala.collection.immutable
 import scala.collection.mutable.ArrayBuffer
-import scala.util.Random
 
+/* BF to instruction bitmap:
+  < 0
+  > 1
+  + 2
+  - 3
+  [ 4
+  ] 5
+ */
+object Op {
+  val Dec = 0
+  val Inc = 1
+  val DataInc = 2
+  val DataDec = 3
+  val JumpF = 4
+  val JumpB = 5
+}
 
 //noinspection TypeAnnotation
 class BrainStem extends Component {
@@ -21,6 +36,7 @@ class BrainStem extends Component {
     val LED3 = out Bool
     val LED4 = out Bool
     val LED5 = out Bool
+    val halt = out Bool
   }
 
   noIoPrefix()
@@ -29,36 +45,22 @@ class BrainStem extends Component {
 
   val code = new ArrayBuffer[BigInt]
 
-  code.append(1)
-  code.append(1)
-  code.append(1)
-  code.append(1)
-  code.append(1)
-  code.append(3)
-  code.append(3)
-  code.append(3)
-  code.append(3)
-  code.append(0)
-  code.append(3)
-  code.append(3)
-  code.append(3)
-  code.append(3)
-  code.append(2)
-  code.append(2)
-  code.append(2)
+
+  // [-]+++
+  code.append(Op.JumpF)
+  code.append(Op.DataDec)
+  code.append(Op.JumpB)
+  code.append(Op.DataInc)
+  code.append(Op.DataInc)
+  code.append(Op.DataInc)
+  code.append(Op.DataInc)
+  code.append(Op.DataInc)
+  code.append(Op.DataInc)
+  code.append(Op.DataInc)
+  code.append(Op.DataInc)
+  code.append(Op.DataInc)
 
   val codeMemSize = code.size
-
-  /* BF to instruction bitmap:
-    < 0
-    > 1
-    + 2
-    - 3
-   */
-  for (_ <- 0 until codeMemSize) {
-    val op = Random.nextInt(4)
-    code.append(op)
-  }
 
   val codeMemInit: immutable.IndexedSeq[UInt] = {
     for(i <- 0 until codeMemSize) yield {
@@ -70,13 +72,7 @@ class BrainStem extends Component {
   codeMem.init(codeMemInit)
 
   val dataMemSize = 128
-  val dataMemInit: immutable.IndexedSeq[UInt] = {
-    for(_ <- 0 until dataMemSize) yield {
-      U(0, 8 bits)
-    }
-  }
   val dataMem = new Mem(UInt(8 bits), dataMemSize)
-  dataMem.init(dataMemInit)
 
   val pc = Reg(UInt(log2Up(codeMemSize) bits))
   val dp = Reg(UInt(log2Up(dataMemSize) bits))
@@ -92,8 +88,11 @@ class BrainStem extends Component {
     val Fetch = new State
     val Decode = new State
     val DataWrite = new State
+    val SeekForward = new State
+    val SeekBack = new State
 
     Cold.onEntry {
+      dataMem(0) := 2
       ledState := 0
       pc := 0
       dp := 0
@@ -119,13 +118,13 @@ class BrainStem extends Component {
 
     Decode.onEntry {
       // PC operation
-      when(op === 0 || op === 1) {
-        dpIncDec := op === 1
+      when(op === Op.Inc || op === Op.Dec) {
+        dpIncDec := op === Op.Inc
         dpIncEnable := True
       } otherwise {
         // Data Operation
-        when( op === 2 || op === 3) {
-          dataIncDec := op === 3
+        when( op === Op.DataInc || op === Op.DataDec) {
+          dataIncDec := op === Op.DataInc
           dataIncEnable := True
         }
       }
@@ -138,17 +137,28 @@ class BrainStem extends Component {
     }
 
     Decode.whenIsActive {
-      when(dataIncEnable) {
-        goto(DataWrite)
-      } otherwise {
-        goto(Fetch)
-      }
+      val jmpFwd = op === Op.JumpF
+      val jmpBack = op === Op.JumpB
+      val isZero = data === 0
 
-      when(dpIncEnable) {
-        when(dpIncDec) {
-          dp := dp + 1
+      when (jmpFwd && isZero) {
+        goto(SeekForward)
+      } otherwise {
+        when(jmpBack && !isZero) {
+          goto(SeekBack)
         } otherwise {
-          dp := dp - 1
+          when(dataIncEnable) {
+            goto(DataWrite)
+          } otherwise {
+            goto(Fetch)
+          }
+          when(dpIncEnable) {
+            when(dpIncDec) {
+              dp := dp + 1
+            } otherwise {
+              dp := dp - 1
+            }
+          }
         }
       }
     }
@@ -164,7 +174,37 @@ class BrainStem extends Component {
     DataWrite.whenIsActive {
       goto(Fetch)
     }
+
+    SeekForward.onEntry {
+      op := codeMem(pc)
+    }
+
+    SeekForward.whenIsActive {
+      when(op === Op.JumpB) {
+        goto(Fetch)
+      } otherwise {
+        pc := pc + 1
+        goto(SeekForward)
+      }
+    }
+
+    SeekBack.onEntry {
+      op := codeMem(pc-1)
+    }
+
+    SeekBack.whenIsActive {
+      op := codeMem(pc-1)
+
+      when(op === Op.JumpF) {
+        goto(Fetch)
+      } otherwise {
+        pc := pc - 1
+        goto(SeekBack)
+      }
+    }
   }
+
+  io.halt := pc === 0xF
 
   io.LEDR_N := ledState(0)
   io.LEDG_N := ledState(1)
