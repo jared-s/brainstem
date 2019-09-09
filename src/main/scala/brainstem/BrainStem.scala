@@ -1,7 +1,6 @@
 package brainstem
 
 import spinal.core._
-import spinal.lib.fsm.{EntryPoint, State, StateMachine}
 
 import scala.collection.immutable
 import scala.collection.mutable.ArrayBuffer
@@ -26,21 +25,11 @@ object Op {
 //noinspection TypeAnnotation
 class BrainStem extends Component {
   val io = new Bundle {
-    val LEDR_N = out Bool
-    val LEDG_N = out Bool
-    val LED_RED_N = out Bool
-    val LED_GRN_N = out Bool
-    val LED_BLU_N = out Bool
-    val LED1 = out Bool
-    val LED2 = out Bool
-    val LED3 = out Bool
-    val LED4 = out Bool
-    val LED5 = out Bool
+    val output = out Bool
+    val data = out UInt (8 bits)
   }
 
   noIoPrefix()
-
-  val ledState = Reg(UInt(10 bits))
 
   val code = new ArrayBuffer[BigInt]
 
@@ -59,154 +48,36 @@ class BrainStem extends Component {
     }
   }
 
-  val codeMem = new Mem(UInt(3 bits), codeMemSize)
+  val codeWidth = 3
+  val dataWidth = 8
+  val codeMem = new Mem(UInt(codeWidth bits), codeMemSize)
   codeMem.init(codeMemInit)
 
   val dataMemSize = 4
-  val dataMem = new Mem(UInt(8 bits), dataMemSize)
+  val dataMem = new Mem(UInt(dataWidth bits), dataMemSize)
 
-  val pc = Reg(UInt(log2Up(codeMemSize) bits))
-  val dp = Reg(UInt(log2Up(dataMemSize) bits))
+  val core = new BFCore(codeWidth = codeWidth, dataWidth = dataWidth, codeMemSize = codeMemSize, dataMemSize = dataMemSize)
 
-  val dpIncDec = Reg(Bool)
-  val dpIncEnable = Reg(Bool)
-  val dataIncDec = Reg(Bool)
-  val dataIncEnable = Reg(Bool)
-  val op = Reg(UInt(3 bits))
+  val state = Reg(UInt(32 bits))
 
-  val fsm = new StateMachine {
-    val Cold = new State with EntryPoint
-    val Fetch = new State
-    val Decode = new State
-    val DataWrite = new State
-    val SeekForward = new State
-    val SeekBack = new State
+  core.io.code := codeMem(core.io.codeAddr)
+  core.io.codeReady := True
 
-    Cold.onEntry {
-      ledState := 0
-      pc := 0
-      dp := 0
-    }
+  core.io.data := dataMem(core.io.dataAddr)
+  core.io.dataReady := True
 
-    Cold.whenIsActive {
-      goto(Fetch)
-    }
-
-    Fetch.onEntry {
-      op := codeMem(pc)
-
-      dpIncDec := False
-      dpIncEnable := False
-      dataIncDec := False
-      dataIncEnable := False
-      pc := pc + 1
-    }
-
-    Fetch.whenIsActive {
-       goto(Decode)
-    }
-
-    Decode.onEntry {
-      // PC operation
-      when(op === Op.Inc || op === Op.Dec) {
-        dpIncDec := op === Op.Inc
-        dpIncEnable := True
-      } otherwise {
-        // Data Operation
-        when( op === Op.DataInc || op === Op.DataDec) {
-          dataIncDec := op === Op.DataInc
-          dataIncEnable := True
-        }
-      }
-    }
-
-    val data = Reg(UInt(8 bits))
-
-    Decode.onEntry {
-      data := dataMem(dp)
-    }
-
-    Decode.whenIsActive {
-      val jmpFwd = op === Op.JumpF
-      val jmpBack = op === Op.JumpB
-      val isZero = data === 0
-
-      when (jmpFwd && isZero) {
-        goto(SeekForward)
-      } otherwise {
-        when(jmpBack && !isZero) {
-          goto(SeekBack)
-        } otherwise {
-          when(dataIncEnable) {
-            goto(DataWrite)
-          } otherwise {
-            goto(Fetch)
-          }
-          when(dpIncEnable) {
-            when(dpIncDec) {
-              dp := dp + 1
-            } otherwise {
-              dp := dp - 1
-            }
-          }
-        }
-      }
-    }
-
-    val newData = Reg(UInt(8 bits))
-
-    DataWrite.onEntry {
-      when(dataIncDec) {
-        newData := data + 1
-      } otherwise {
-        newData := data - 1
-      }
-    }
-
-    DataWrite.whenIsActive {
-      dataMem(dp) := newData
-      goto(Fetch)
-    }
-
-    SeekForward.onEntry {
-      op := codeMem(pc)
-    }
-
-    SeekForward.whenIsActive {
-      when(op === Op.JumpB) {
-        goto(Fetch)
-      } otherwise {
-        pc := pc + 1
-        goto(SeekForward)
-      }
-    }
-
-    SeekBack.onEntry {
-      op := codeMem(pc-1)
-    }
-
-    SeekBack.whenIsActive {
-      op := codeMem(pc-1)
-
-      when(op === Op.JumpF) {
-        goto(Fetch)
-      } otherwise {
-        pc := pc - 1
-        goto(SeekBack)
-      }
-    }
+  when(core.io.dataWriteEnable) {
+    dataMem(core.io.dataAddr) := core.io.dataOut
+    core.io.dataWriteAck := True
+  } otherwise {
+    core.io.dataWriteAck := False
   }
 
-  io.LEDR_N := dpIncDec
-  io.LEDG_N := dpIncEnable
-  io.LED_RED_N := op(0)
-  io.LED_GRN_N := op(1)
-  io.LED_BLU_N := op(2)
-  io.LED1 := dataIncDec
-  io.LED2 := dataIncEnable
-  io.LED3 := ledState(7)
-  io.LED4 := dp(0)
-  io.LED5 := pc(0)
+  state := (state ^ core.io.dataOut.resized)
+  state(0) := state(0) ^ core.io.dataAddrValid ^ core.io.codeAddrValid
+
+  io.output := state.xorR
+  io.data := core.io.data
 }
 
 object BrainStemVerilog {
