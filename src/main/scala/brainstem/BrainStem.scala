@@ -51,7 +51,6 @@ class BrainStem extends Component {
   code.append(Op.Inc)
   code.append(Op.JumpB)
 
-
   val codeMemSize = code.size
 
   val codeMemInit: immutable.IndexedSeq[UInt] = {
@@ -63,7 +62,7 @@ class BrainStem extends Component {
   val codeMem = new Mem(UInt(3 bits), codeMemSize)
   codeMem.init(codeMemInit)
 
-  val dataMemSize = 128
+  val dataMemSize = 4
   val dataMem = new Mem(UInt(8 bits), dataMemSize)
 
   val pc = Reg(UInt(log2Up(codeMemSize) bits))
@@ -84,9 +83,6 @@ class BrainStem extends Component {
     val SeekBack = new State
 
     Cold.onEntry {
-      dataMem(0) := 2
-      dataMem(1) := 3
-
       ledState := 0
       pc := 0
       dp := 0
@@ -157,15 +153,18 @@ class BrainStem extends Component {
       }
     }
 
+    val newData = Reg(UInt(8 bits))
+
     DataWrite.onEntry {
       when(dataIncDec) {
-        dataMem(dp) := data + 1
+        newData := data + 1
       } otherwise {
-        dataMem(dp) := data - 1
+        newData := data - 1
       }
     }
 
     DataWrite.whenIsActive {
+      dataMem(dp) := newData
       goto(Fetch)
     }
 
@@ -212,7 +211,7 @@ class BrainStem extends Component {
 
 object BrainStemVerilog {
   def main(args: Array[String]) {
-    SpinalVerilog(new BrainStem).printPruned()
+    SpinalConfig().generateVerilog(new BrainStem).printPruned()
   }
 }
 
