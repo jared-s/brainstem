@@ -1,8 +1,8 @@
 package brainstem
 
 import spinal.core._
-import spinal.lib.PriorityMux
 import spinal.lib.fsm.{EntryPoint, State, StateMachine}
+import spinal.lib.{PriorityMux, Timeout}
 
 import scala.collection.immutable
 import scala.collection.mutable.ArrayBuffer
@@ -30,9 +30,6 @@ class BrainStem extends Component {
   val io = new Bundle {
     val LEDR_N = out Bool
     val LEDG_N = out Bool
-    val LED_RED_N = out Bool
-    val LED_GRN_N = out Bool
-    val LED_BLU_N = out Bool
     val LED1 = out Bool
     val LED2 = out Bool
     val LED3 = out Bool
@@ -60,7 +57,7 @@ class BrainStem extends Component {
   }
 
   val codeWidth = 3
-  val dataWidth = 64
+  val dataWidth = 128
   val codeAddr = Reg(UInt(log2Up(codeMemSize) bits))
 
   val codeMem = new Mem(UInt(codeWidth bits), codeMemSize)
@@ -71,12 +68,12 @@ class BrainStem extends Component {
 
   val dataAddr = Reg(UInt(log2Up(dataMemSize) bits))
   val data = Reg(UInt(dataWidth bits))
+  val dataOut = Reg(UInt(dataWidth bits))
 
   val dataWriteEnable = Reg(Bool)
-  val flip = Reg(Bool)
 
   val led5State = Reg(UInt(5 bits))
-  io.LED1 := led5State(1)
+  io.LED1 := led5State(0)
   io.LED2 := led5State(1)
   io.LED3 := led5State(2)
   io.LED4 := led5State(3)
@@ -86,18 +83,6 @@ class BrainStem extends Component {
   io.LEDR_N := led2State(0)
   io.LEDG_N := led2State(1)
 
-  val led3State = Reg(UInt(3 bits))
-
-  io.LED_RED_N := led3State(0)
-  io.LED_GRN_N := led3State(1)
-  io.LED_BLU_N := led3State(2)
-
-  when(flip) {
-    led5State := data.resized
-    led3State(1) := dataWriteEnable
-  }
-
-  flip := ~flip
 
   val codeReady = Reg(Bool)
   val dataReady = Reg(Bool)
@@ -109,13 +94,13 @@ class BrainStem extends Component {
 
     Cold.onEntry {
       codeReady := True
-      led2State := 0
-      led3State := 0
+      led2State := 3
       led5State := 0
       data := 0
       dataAddr := 0
       dataReady := True
       dataWriteAck := False
+      state := 0
     }
 
     Cold.whenIsActive {
@@ -127,11 +112,20 @@ class BrainStem extends Component {
         data := dataMem(dataAddr)
         dataWriteAck := False
       }
+
+      state := state ^ data.resized
+
+      val t = Timeout(17 ms)
+      when(t) {
+        led2State(0) := dataWriteEnable
+        led2State(1) := dataWriteAck
+        led5State := state.resized
+        t.clear()
+      }
+
       goto(Cold)
     }
   }
-  val dataOut = Reg(UInt(dataWidth bits))
-
 
 
   val cores = ArrayBuffer[BFCore]()
@@ -157,8 +151,8 @@ class BrainStem extends Component {
 
 object BrainStemVerilog {
   def main(args: Array[String]) {
-    SpinalConfig()
-      .addStandardMemBlackboxing(blackboxAllWhatsYouCan)
+    SpinalConfig(defaultClockDomainFrequency = FixedFrequency(12 MHz))
+      .addStandardMemBlackboxing(blackboxOnlyIfRequested)
       .generateVerilog(new BrainStem).printPruned()
   }
 }
