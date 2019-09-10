@@ -54,29 +54,29 @@ class BrainStem extends Component {
   val codeMemSize = bootcode.size
 
   val codeMemInit: immutable.IndexedSeq[UInt] = {
-    for(i <- 0 until codeMemSize) yield {
+    for (i <- 0 until codeMemSize) yield {
       U(bootcode(i), 8 bits)
     }
   }
 
   val codeWidth = 3
-  val dataWidth = 16
+  val dataWidth = 64
   val codeAddr = Reg(UInt(log2Up(codeMemSize) bits))
 
   val codeMem = new Mem(UInt(codeWidth bits), codeMemSize)
   codeMem.init(codeMemInit)
 
-  val dataMemSize = 3 * 1024
-  val dataMem = new ICERam(dataWidth, dataMemSize)
+  val dataMemSize = 2
+  val dataMem = new Mem(UInt(dataWidth bits), dataMemSize)
 
-  val dataAddr = Reg(UInt(8 bits))
+  val dataAddr = Reg(UInt(log2Up(dataMemSize) bits))
   val data = Reg(UInt(dataWidth bits))
 
   val dataWriteEnable = Reg(Bool)
   val flip = Reg(Bool)
 
   val led5State = Reg(UInt(5 bits))
-  io.LED1 := led5State(0)
+  io.LED1 := led5State(1)
   io.LED2 := led5State(1)
   io.LED3 := led5State(2)
   io.LED4 := led5State(3)
@@ -115,32 +115,35 @@ class BrainStem extends Component {
       data := 0
       dataAddr := 0
       dataReady := True
-      dataWriteAck := True
+      dataWriteAck := False
     }
 
     Cold.whenIsActive {
       dataAddr := dataAddr + 1
+      when(dataWriteEnable) {
+        dataMem(dataAddr) := dataOut
+        dataWriteAck := True
+      } otherwise {
+        data := dataMem(dataAddr)
+        dataWriteAck := False
+      }
       goto(Cold)
     }
   }
   val dataOut = Reg(UInt(dataWidth bits))
 
-  dataMem.io.wdata := dataOut
-  dataMem.io.addr := dataAddr
-  dataMem.io.we := dataWriteEnable
-  data := dataMem.io.rdata
+
 
   val cores = ArrayBuffer[BFCore]()
 
   for (i <- 0 until 2) {
-      val core = new BFCore(codeWidth = codeWidth, dataWidth = dataWidth, codeMemSize = codeMemSize, dataMemSize = dataMemSize, pcInit = 0, dpInit = i)
-      cores.append(core)
+    val core = new BFCore(codeWidth = codeWidth, dataWidth = dataWidth, codeMemSize = codeMemSize, dataMemSize = dataMemSize, pcInit = 0, dpInit = i)
+    cores.append(core)
     core.io.code := codeMem(core.io.codeAddr)
     core.io.codeReady := codeReady
     core.io.data := data
     core.io.dataReady := dataReady
     core.io.dataWriteAck := dataWriteAck
-
   }
 
   dataAddr := PriorityMux(cores.map(c => c.io.dataAddrValid), cores.map(c => c.io.dataAddr)).resized
@@ -155,7 +158,7 @@ class BrainStem extends Component {
 object BrainStemVerilog {
   def main(args: Array[String]) {
     SpinalConfig()
-      .addStandardMemBlackboxing(blackboxOnlyIfRequested)
+      .addStandardMemBlackboxing(blackboxAllWhatsYouCan)
       .generateVerilog(new BrainStem).printPruned()
   }
 }

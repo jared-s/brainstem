@@ -36,7 +36,7 @@ class BFCore(codeWidth: Int = 3, dataWidth: Int = 8, codeMemSize: Int = 8, dataM
 
   val codeAddrValid = Reg(Bool) init False
   val dataAddrValid = Reg(Bool) init False
-  val dataWriteEnable = Reg(Bool) init False
+  val dataWriteEnable = Reg(Bool)
   val dataOut = Reg(UInt(dataWidth bits)) init 0
 
   io.codeAddrValid := codeAddrValid
@@ -56,7 +56,7 @@ class BFCore(codeWidth: Int = 3, dataWidth: Int = 8, codeMemSize: Int = 8, dataM
     val SeekBackFetch = new State
     val SeekBackStep = new State
 
-    val data = Reg(UInt(16 bits))
+    val data = Reg(UInt(dataWidth bits))
 
     Cold.onEntry {
       pc := pcInit
@@ -74,6 +74,7 @@ class BFCore(codeWidth: Int = 3, dataWidth: Int = 8, codeMemSize: Int = 8, dataM
       dpIncEnable := False
       dataIncDec := False
       dataIncEnable := False
+      dataWriteEnable := False
       pc := pc + 1
     }
 
