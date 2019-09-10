@@ -3,7 +3,7 @@ package brainstem
 import spinal.core._
 import spinal.lib.fsm.{EntryPoint, State, StateMachine}
 
-class BFCore(codeWidth: Int = 3, dataWidth: Int = 8, codeMemSize: Int = 8, dataMemSize: Int = 8) extends Component {
+class BFCore(codeWidth: Int = 3, dataWidth: Int = 8, codeMemSize: Int = 8, dataMemSize: Int = 8, pcInit: Int = 0, dpInit: Int = 0) extends Component {
   val io = new Bundle {
     val codeAddr = out UInt (log2Up(codeMemSize) bits)
     val codeAddrValid = out Bool
@@ -59,8 +59,8 @@ class BFCore(codeWidth: Int = 3, dataWidth: Int = 8, codeMemSize: Int = 8, dataM
     val data = Reg(UInt(8 bits))
 
     Cold.onEntry {
-      pc := 0
-      dp := 0
+      pc := pcInit
+      dp := dpInit
     }
 
     Cold.whenIsActive {

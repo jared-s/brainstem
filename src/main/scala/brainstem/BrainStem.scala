@@ -1,6 +1,7 @@
 package brainstem
 
 import spinal.core._
+import spinal.lib.PriorityMux
 
 import scala.collection.immutable
 import scala.collection.mutable.ArrayBuffer
@@ -22,7 +23,7 @@ object Op {
   val JumpB = 5
 }
 
-//noinspection TypeAnnotation
+//noinspection TypeAnnotation,FieldFromDelayedInit
 class BrainStem extends Component {
   val io = new Bundle {
     val output = out Bool
@@ -31,20 +32,20 @@ class BrainStem extends Component {
 
   noIoPrefix()
 
-  val code = new ArrayBuffer[BigInt]
+  val bootcode = new ArrayBuffer[BigInt]
 
   // [-]>]
-  code.append(Op.JumpF)
-  code.append(Op.DataDec)
-  code.append(Op.JumpB)
-  code.append(Op.Inc)
-  code.append(Op.JumpB)
+  bootcode.append(Op.JumpF)
+  bootcode.append(Op.DataDec)
+  bootcode.append(Op.JumpB)
+  bootcode.append(Op.Inc)
+  bootcode.append(Op.JumpB)
 
-  val codeMemSize = code.size
+  val codeMemSize = bootcode.size
 
   val codeMemInit: immutable.IndexedSeq[UInt] = {
     for(i <- 0 until codeMemSize) yield {
-      U(code(i), 8 bits)
+      U(bootcode(i), 8 bits)
     }
   }
 
@@ -53,36 +54,71 @@ class BrainStem extends Component {
   val codeMem = new Mem(UInt(codeWidth bits), codeMemSize)
   codeMem.init(codeMemInit)
 
-  val dataMemSize = 4
+  val dataMemSize = 24
   val dataMem = new Mem(UInt(dataWidth bits), dataMemSize)
 
-  val core = new BFCore(codeWidth = codeWidth, dataWidth = dataWidth, codeMemSize = codeMemSize, dataMemSize = dataMemSize)
+  val cores = ArrayBuffer[BFCore]()
+
+  for (i <- 0 until 10) {
+    val core = new BFCore(codeWidth = codeWidth, dataWidth = dataWidth, codeMemSize = codeMemSize, dataMemSize = dataMemSize, pcInit = 0, dpInit = i)
+    cores.append(core)
+  }
 
   val state = Reg(UInt(32 bits))
 
-  core.io.code := codeMem(core.io.codeAddr)
-  core.io.codeReady := True
+  val codeAddrValids = cores.map(b => b.io.codeAddrValid)
+  val codeAddrs = cores.map(b => b.io.codeAddr)
+  val dataAddrValids = cores.map(b => b.io.dataAddrValid)
+  val dataAddrs = cores.map(b => b.io.dataAddr)
 
-  core.io.data := dataMem(core.io.dataAddr)
-  core.io.dataReady := True
+  val codeDataReadies = cores.map(b => b.io.codeReady)
 
-  when(core.io.dataWriteEnable) {
-    dataMem(core.io.dataAddr) := core.io.dataOut
-    core.io.dataWriteAck := True
-  } otherwise {
-    core.io.dataWriteAck := False
+  val codeAddr = PriorityMux(codeAddrValids, codeAddrs)
+  val dataAddr = PriorityMux(dataAddrValids, dataAddrs)
+
+  val code = Reg(UInt(codeWidth bits))
+  val data = Reg(UInt(dataWidth bits))
+  val dataWrite = Reg(Bool)
+
+  code := codeMem(codeAddr)
+  data := dataMem(dataAddr)
+
+  for (c <- cores.indices) {
+    val core = cores(c)
+    core.io.code := code
+    core.io.codeReady := core.io.codeAddr === codeAddr
+
+    core.io.data := data
+    core.io.dataReady := core.io.dataAddr === dataAddr
+
+    when(core.io.dataWriteEnable) {
+      data := core.io.dataOut
+      dataWrite := True
+      core.io.dataWriteAck := True
+    } otherwise {
+      core.io.dataWriteAck := False
+    }
   }
 
-  state := (state ^ core.io.dataOut.resized)
-  state(0) := state(0) ^ core.io.dataAddrValid ^ core.io.codeAddrValid
+  when(dataWrite) {
+    dataWrite := False
+    dataMem(dataAddr) := data
+  }
+
+  state := (state ^ cores(0).io.dataOut.resized ^ cores(0).io.dataOut.resized)
+  state(0) := state(0) ^ cores(0).io.dataAddrValid ^ cores(0).io.codeAddrValid
 
   io.output := state.xorR
-  io.data := core.io.data
+  io.data := state.resized
+
+
 }
 
 object BrainStemVerilog {
   def main(args: Array[String]) {
-    SpinalConfig().generateVerilog(new BrainStem).printPruned()
+    SpinalConfig()
+      .addStandardMemBlackboxing(blackboxAllWhatsYouCan)
+      .generateVerilog(new BrainStem).printPruned()
   }
 }
 
