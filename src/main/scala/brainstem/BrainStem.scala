@@ -1,7 +1,7 @@
 package brainstem
 
 import spinal.core._
-import spinal.lib.PriorityMux
+import spinal.lib.fsm.{EntryPoint, State, StateMachine}
 
 import scala.collection.immutable
 import scala.collection.mutable.ArrayBuffer
@@ -26,8 +26,16 @@ object Op {
 //noinspection TypeAnnotation,FieldFromDelayedInit
 class BrainStem extends Component {
   val io = new Bundle {
-    val output = out Bool
-    val data = out UInt (8 bits)
+    val LEDR_N = out Bool
+    val LEDG_N = out Bool
+    val LED_RED_N = out Bool
+    val LED_GRN_N = out Bool
+    val LED_BLU_N = out Bool
+    val LED1 = out Bool
+    val LED2 = out Bool
+    val LED3 = out Bool
+    val LED4 = out Bool
+    val LED5 = out Bool
   }
 
   noIoPrefix()
@@ -54,64 +62,74 @@ class BrainStem extends Component {
   val codeMem = new Mem(UInt(codeWidth bits), codeMemSize)
   codeMem.init(codeMemInit)
 
-  val dataMemSize = 24
+  val dataMemSize = 10 * 1024
   val dataMem = new Mem(UInt(dataWidth bits), dataMemSize)
+  dataMem.generateAsBlackBox()
 
-  val cores = ArrayBuffer[BFCore]()
+  val dataAddr = Reg(UInt(log2Up(dataMemSize) bits))
+  val data = Reg(UInt(dataWidth bits))
+  val dataEnable = Reg(Bool)
+  val dataWriteEnable = Reg(Bool)
+  val flip = Reg(Bool)
 
-  for (i <- 0 until 10) {
-    val core = new BFCore(codeWidth = codeWidth, dataWidth = dataWidth, codeMemSize = codeMemSize, dataMemSize = dataMemSize, pcInit = 0, dpInit = i)
-    cores.append(core)
+
+  val led5State = Reg(UInt(5 bits))
+  io.LED1 := led5State(0)
+  io.LED2 := led5State(1)
+  io.LED3 := led5State(2)
+  io.LED4 := led5State(3)
+  io.LED5 := led5State(4)
+
+  val led2State = Reg(UInt(2 bits))
+  io.LEDR_N := led2State(0)
+  io.LEDG_N := led2State(1)
+
+  val led3State = Reg(UInt(3 bits))
+
+  io.LED_RED_N := led3State(0)
+  io.LED_GRN_N := led3State(1)
+  io.LED_BLU_N := led3State(2)
+
+  when(flip) {
+    led5State := data.resized
+    led3State(0) := dataEnable
+    led3State(1) := dataWriteEnable
   }
+
+  flip := ~flip
 
   val state = Reg(UInt(32 bits))
+  var fsm = new StateMachine {
+    val Cold = new State with EntryPoint
 
-  val codeAddrValids = cores.map(b => b.io.codeAddrValid)
-  val codeAddrs = cores.map(b => b.io.codeAddr)
-  val dataAddrValids = cores.map(b => b.io.dataAddrValid)
-  val dataAddrs = cores.map(b => b.io.dataAddr)
+    Cold.onEntry {
+      state := 0x0eadbeef
+      dataEnable := False
+      dataWriteEnable := False
+      led2State := 0
+      led3State := 0
+      led5State := 0
+      data := 0
+      dataAddr := 0
+    }
 
-  val codeDataReadies = cores.map(b => b.io.codeReady)
+    Cold.whenIsActive {
+      state := (state.resized ^ data.resized).resized
+      dataAddr := dataAddr + 1
+      dataEnable := state(31)
+      dataWriteEnable := state(30)
 
-  val codeAddr = PriorityMux(codeAddrValids, codeAddrs)
-  val dataAddr = PriorityMux(dataAddrValids, dataAddrs)
+      data := dataMem.readSync(dataAddr, dataEnable, readUnderWrite = dontCare, clockCrossing = false)
 
-  val code = Reg(UInt(codeWidth bits))
-  val data = Reg(UInt(dataWidth bits))
-  val dataWrite = Reg(Bool)
-
-  code := codeMem(codeAddr)
-  data := dataMem(dataAddr)
-
-  for (c <- cores.indices) {
-    val core = cores(c)
-    core.io.code := code
-    core.io.codeReady := core.io.codeAddr === codeAddr
-
-    core.io.data := data
-    core.io.dataReady := core.io.dataAddr === dataAddr
-
-    when(core.io.dataWriteEnable) {
-      data := core.io.dataOut
-      dataWrite := True
-      core.io.dataWriteAck := True
-    } otherwise {
-      core.io.dataWriteAck := False
+      goto(Cold)
     }
   }
+  /*  val cores = ArrayBuffer[BFCore]()
 
-  when(dataWrite) {
-    dataWrite := False
-    dataMem(dataAddr) := data
-  }
-
-  state := (state ^ cores(0).io.dataOut.resized ^ cores(0).io.dataOut.resized)
-  state(0) := state(0) ^ cores(0).io.dataAddrValid ^ cores(0).io.codeAddrValid
-
-  io.output := state.xorR
-  io.data := state.resized
-
-
+    for (i <- 0 until 10) {
+      val core = new BFCore(codeWidth = codeWidth, dataWidth = dataWidth, codeMemSize = codeMemSize, dataMemSize = dataMemSize, pcInit = 0, dpInit = i)
+      cores.append(core)
+    }*/
 }
 
 object BrainStemVerilog {
