@@ -56,7 +56,7 @@ class BFCore(codeWidth: Int = 3, dataWidth: Int = 8, codeMemSize: Int = 8, dataM
     val SeekBackFetch = new State
     val SeekBackStep = new State
 
-    val data = Reg(UInt(8 bits))
+    val data = Reg(UInt(16 bits))
 
     Cold.onEntry {
       pc := pcInit
